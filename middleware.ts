@@ -17,15 +17,34 @@ export async function middleware(request: NextRequest) {
     redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
     return NextResponse.redirect(redirectUrl)
   }
+  // If already authenticated and on /auth, send to intended page or home
+  if (session && request.nextUrl.pathname.startsWith('/auth')) {
+    const dest = request.nextUrl.searchParams.get('redirectTo') || '/'
+    return NextResponse.redirect(new URL(dest, request.url))
+  }
 
   // Security headers
-  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  const nonce = crypto.randomUUID()
+  // Allow Supabase network calls (REST, Auth, Realtime) in dev/prod
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseOrigin = (() => {
+    try { return supabaseUrl ? new URL(supabaseUrl).origin : '' } catch { return '' }
+  })()
+  const supabaseWsOrigin = supabaseOrigin
+    ? supabaseOrigin.replace('https://', 'wss://').replace('http://', 'ws://')
+    : ''
+  const connectSrc = [
+    "'self'",
+    supabaseOrigin,
+    supabaseWsOrigin,
+  ].filter(Boolean).join(' ')
   const cspHeader = `
     default-src 'self';
     script-src 'self' 'nonce-${nonce}' 'strict-dynamic';
     style-src 'self' 'unsafe-inline';
-    img-src 'self' blob: data:;
-    font-src 'self';
+    img-src 'self' blob: data: https:;
+    font-src 'self' https: data:;
+    connect-src ${connectSrc};
     object-src 'none';
     base-uri 'self';
     form-action 'self';

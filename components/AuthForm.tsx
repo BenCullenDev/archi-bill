@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useRouter, useSearchParams } from 'next/navigation'
 
 interface AuthFormProps {
   initialError?: string | null
@@ -15,6 +16,9 @@ export function AuthForm({ initialError }: AuthFormProps) {
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(initialError || null)
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectTo = searchParams.get('redirectTo') || '/'
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,6 +53,10 @@ export function AuthForm({ initialError }: AuthFormProps) {
 
     if (error) {
       setError(error.message)
+    } else {
+      // On success, navigate to the original destination or home
+      router.replace(redirectTo)
+      router.refresh()
     }
     setIsLoading(false)
   }
@@ -78,14 +86,14 @@ export function AuthForm({ initialError }: AuthFormProps) {
             disabled={isLoading}
             variant="default"
           >
-            Sign In
+            {isLoading ? 'Signing in…' : 'Sign In'}
           </Button>
           <Button
             onClick={handleSignUp}
             disabled={isLoading}
             variant="outline"
           >
-            Sign Up
+            {isLoading ? 'Signing up…' : 'Sign Up'}
           </Button>
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
