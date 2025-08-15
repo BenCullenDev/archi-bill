@@ -62,9 +62,9 @@ export async function middleware(request: NextRequest) {
   const isDev = process.env.NODE_ENV !== 'production'
   const scriptSrc = [
     "'self'",
-    `'nonce-${nonce}'`,
-    "'unsafe-inline'", // required for Next inline hydration/scripts unless all scripts are nonced
-    isDev ? "'unsafe-eval'" : '', // dev only for React Fast Refresh, etc.
+    "'unsafe-inline'", // allow Next inline hydration scripts
+    isDev ? "'unsafe-eval'" : '', // dev only
+    'blob:',
   ].filter(Boolean).join(' ')
   const cspHeader = `
     default-src 'self';
@@ -72,7 +72,7 @@ export async function middleware(request: NextRequest) {
     style-src 'self' 'unsafe-inline';
     img-src 'self' blob: data: https:;
     font-src 'self' https: data:;
-    connect-src ${connectSrc};
+  connect-src ${connectSrc} https: wss:;
     object-src 'none';
     base-uri 'self';
     form-action 'self';
