@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
-import { Button } from "@/components/ui/button"
-import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function Home() {
@@ -71,41 +69,14 @@ export default function Home() {
     }
   }, [router])
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/auth')
-  }
-
-  const [role, setRole] = useState<'admin' | 'user' | 'anonymous'>('anonymous')
-  useEffect(() => {
-    const getRole = async () => {
-      try {
-        const res = await fetch('/api/me', { cache: 'no-store' })
-        if (!res.ok) return
-        const data = await res.json()
-        setRole(data.role)
-      } catch {}
-    }
-    getRole()
-  }, [])
+  // Sign out and admin link are handled by the Header component
 
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-2xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Welcome to ArchiBill</h1>
-          <Button
-            onClick={handleSignOut}
-            variant="destructive"
-          >
-            Sign Out
-          </Button>
-        </div>
-  {role === 'admin' && (
-          <div className="mb-4">
-            <Link href="/admin" className="text-sm text-primary underline">Go to Admin</Link>
-          </div>
-        )}
+  </div>
         
         <Card>
           <CardHeader>

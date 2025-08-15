@@ -2,11 +2,11 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { createServerComponentClient, createServerActionClient } from '@supabase/auth-helpers-nextjs'
 import { Button } from '@/components/ui/button'
-import Image from 'next/image'
 import { redirect } from 'next/navigation'
 
 export default async function Header() {
-  const supabase = createServerComponentClient({ cookies })
+  const cookieStore = await cookies() as any
+  const supabase = createServerComponentClient({ cookies: () => cookieStore })
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -21,7 +21,8 @@ export default async function Header() {
 
   async function signOut() {
     'use server'
-    const supabase = createServerActionClient({ cookies })
+    const cookieStore = await cookies() as any
+    const supabase = createServerActionClient({ cookies: () => cookieStore })
     await supabase.auth.signOut()
     redirect('/auth')
   }
@@ -31,7 +32,6 @@ export default async function Header() {
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2">
-            <Image src="/vercel.svg" alt="ArchiBill" width={20} height={20} />
             <span className="font-semibold">ArchiBill</span>
           </Link>
           <nav className="ml-6 hidden items-center gap-4 text-sm text-muted-foreground md:flex">

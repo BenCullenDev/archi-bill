@@ -16,6 +16,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(initialError || null)
+  const [message, setMessage] = useState<string | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirectTo = searchParams.get('redirectTo') || '/'
@@ -24,19 +25,31 @@ export function AuthForm({ initialError }: AuthFormProps) {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
+    setMessage(null)
 
-    const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+    emailRedirectTo: `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`,
       },
     })
 
     if (error) {
-      setError(error.message)
+      const msg = error.message?.toLowerCase() || ''
+      if (msg.includes('registered') || msg.includes('exists')) {
+        setError('An account with this email already exists. Please Sign In instead.')
+      } else {
+        setError(error.message)
+      }
     } else {
-      setError('Check your email for the confirmation link.')
+      // Supabase sometimes returns a user with empty identities array when email already exists
+      const identities = (data as any)?.user?.identities as Array<any> | undefined
+      if (Array.isArray(identities) && identities.length === 0) {
+        setError('An account with this email already exists. Please Sign In instead.')
+      } else {
+        setMessage('Check your email for the confirmation link.')
+      }
     }
     setIsLoading(false)
   }
@@ -44,7 +57,8 @@ export function AuthForm({ initialError }: AuthFormProps) {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    setError(null)
+  setError(null)
+  setMessage(null)
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -80,23 +94,24 @@ export function AuthForm({ initialError }: AuthFormProps) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <div className="flex flex-col space-y-2">
+    <div className="flex flex-col space-y-2">
           <Button
             onClick={handleSignIn}
-            disabled={isLoading}
+      disabled={isLoading || !email || !password}
             variant="default"
           >
             {isLoading ? 'Signing in…' : 'Sign In'}
           </Button>
           <Button
             onClick={handleSignUp}
-            disabled={isLoading}
+      disabled={isLoading || !email || !password}
             variant="outline"
           >
             {isLoading ? 'Signing up…' : 'Sign Up'}
           </Button>
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+    {error && <p className="text-sm text-destructive">{error}</p>}
+    {message && <p className="text-sm text-muted-foreground">{message}</p>}
       </CardContent>
     </Card>
   )
