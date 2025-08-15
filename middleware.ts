@@ -10,6 +10,15 @@ export async function middleware(request: NextRequest) {
 
   // Refresh session if expired - required for Server Components
   const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user ?? null
+  const adminEmail = process.env.ADMIN_EMAIL
+  const isAdmin = !!(
+    user && (
+      (adminEmail && user.email && user.email.toLowerCase() === adminEmail.toLowerCase()) ||
+      // Optional: if you later store { app_metadata: { role: 'admin' } }
+      (user.app_metadata && (user.app_metadata as any).role === 'admin')
+    )
+  )
 
   // Handle authentication
   if (!session && !request.nextUrl.pathname.startsWith('/auth')) {
@@ -21,6 +30,18 @@ export async function middleware(request: NextRequest) {
   if (session && request.nextUrl.pathname.startsWith('/auth')) {
     const dest = request.nextUrl.searchParams.get('redirectTo') || '/'
     return NextResponse.redirect(new URL(dest, request.url))
+  }
+
+  // Protect admin-only routes
+  if (request.nextUrl.pathname.startsWith('/admin')) {
+    if (!session) {
+      const redirectUrl = new URL('/auth', request.url)
+      redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
+      return NextResponse.redirect(redirectUrl)
+    }
+    if (!isAdmin) {
+      return NextResponse.redirect(new URL('/', request.url))
+    }
   }
 
   // Security headers
@@ -53,7 +74,7 @@ export async function middleware(request: NextRequest) {
     upgrade-insecure-requests;
   `
 
-  // Apply security headers
+  // Apply security headers (to request for internal handlers)
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-nonce', nonce)
   requestHeaders.set('Content-Security-Policy', cspHeader.replace(/\s{2,}/g, ' ').trim())
@@ -61,6 +82,12 @@ export async function middleware(request: NextRequest) {
   requestHeaders.set('X-Content-Type-Options', 'nosniff')
   requestHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   requestHeaders.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  // Also forward role to route handlers
+  if (isAdmin) {
+    requestHeaders.set('x-user-role', 'admin')
+  } else if (session) {
+    requestHeaders.set('x-user-role', 'user')
+  }
 
   // Update response headers
   const response = NextResponse.next({
@@ -69,15 +96,20 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  // Set secure cookie attributes
-  response.cookies.set({
-    name: 'session',
-    value: session?.access_token || '',
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: session ? 60 * 60 * 24 * 7 : 0, // 1 week or delete if no session
-  })
+  // Mirror headers on the response so the browser enforces them
+  response.headers.set('x-nonce', nonce)
+  response.headers.set('Content-Security-Policy', cspHeader.replace(/\s{2,}/g, ' ').trim())
+  response.headers.set('X-Frame-Options', 'DENY')
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+
+  // Pass role information downstream if needed by server components
+  if (isAdmin) {
+    response.headers.set('x-user-role', 'admin')
+  } else if (session) {
+    response.headers.set('x-user-role', 'user')
+  }
 
   return response
 }

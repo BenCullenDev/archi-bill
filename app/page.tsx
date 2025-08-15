@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { User } from '@supabase/supabase-js'
 import { Button } from "@/components/ui/button"
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function Home() {
@@ -75,6 +76,19 @@ export default function Home() {
     router.push('/auth')
   }
 
+  const [role, setRole] = useState<'admin' | 'user' | 'anonymous'>('anonymous')
+  useEffect(() => {
+    const getRole = async () => {
+      try {
+        const res = await fetch('/api/me', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json()
+        setRole(data.role)
+      } catch {}
+    }
+    getRole()
+  }, [])
+
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-2xl mx-auto">
@@ -87,6 +101,11 @@ export default function Home() {
             Sign Out
           </Button>
         </div>
+  {role === 'admin' && (
+          <div className="mb-4">
+            <Link href="/admin" className="text-sm text-primary underline">Go to Admin</Link>
+          </div>
+        )}
         
         <Card>
           <CardHeader>
