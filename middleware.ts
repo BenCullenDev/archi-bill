@@ -59,9 +59,16 @@ export async function middleware(request: NextRequest) {
     supabaseOrigin,
     supabaseWsOrigin,
   ].filter(Boolean).join(' ')
+  const isDev = process.env.NODE_ENV !== 'production'
+  const scriptSrc = [
+    "'self'",
+    `'nonce-${nonce}'`,
+    "'unsafe-inline'", // required for Next inline hydration/scripts unless all scripts are nonced
+    isDev ? "'unsafe-eval'" : '', // dev only for React Fast Refresh, etc.
+  ].filter(Boolean).join(' ')
   const cspHeader = `
     default-src 'self';
-    script-src 'self' 'nonce-${nonce}' 'strict-dynamic';
+    script-src ${scriptSrc};
     style-src 'self' 'unsafe-inline';
     img-src 'self' blob: data: https:;
     font-src 'self' https: data:;
