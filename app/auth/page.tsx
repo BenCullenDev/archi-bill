@@ -1,15 +1,22 @@
 'use client'
 
+import { Suspense } from 'react'
 import { AuthForm } from '@/components/AuthForm'
 import { useSearchParams } from 'next/navigation'
 
-export default function AuthPage() {
+function AuthContent() {
   const searchParams = useSearchParams()
   const error = searchParams.get('error')
 
+  return <AuthForm initialError={error} />
+}
+
+export default function AuthPage() {
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <AuthForm initialError={error} />
+      <Suspense fallback={<div>Loading...</div>}>
+        <AuthContent />
+      </Suspense>
     </div>
   )
 }
