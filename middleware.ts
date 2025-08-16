@@ -3,14 +3,67 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  const res = NextResponse.next()
-  
-  // Create Supabase client
+  // If Supabase redirected back with an auth code to a non-callback path, forward it to the client callback page
+  const urlWithCode = request.nextUrl
+  const hasCode = urlWithCode.searchParams.has('code')
+  if (hasCode && urlWithCode.pathname !== '/auth/callback') {
+    const dest = new URL('/auth/callback', request.url)
+    // Preserve all existing params (code, state, type, etc.)
+    urlWithCode.searchParams.forEach((v, k) => dest.searchParams.set(k, v))
+    // Also carry forward intended post-login path
+    if (!dest.searchParams.has('redirectTo')) dest.searchParams.set('redirectTo', urlWithCode.pathname || '/')
+    return NextResponse.redirect(dest)
+  }
+  // Prepare request headers (CSP nonce, role propagation, etc.) before creating the response
+  const nonce = crypto.randomUUID()
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-nonce', nonce)
+  if (request.nextUrl.pathname.startsWith('/auth')) {
+    requestHeaders.set('x-hide-header', '1')
+  }
+
+  // Create a response that forwards modified request headers downstream
+  const res = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  })
+
+  // Create Supabase client bound to this response to preserve Set-Cookie headers
   const supabase = createMiddlewareClient({ req: request, res })
+  // Helper: create a redirect response while preserving cookies set on `res`
+  const redirectWithCookies = (to: URL | string, status: number = 307) => {
+    const location = typeof to === 'string' ? new URL(to, request.url) : to
+    const redirectRes = NextResponse.redirect(location, status)
+    // Copy cookies set on `res` (e.g., clearing auth cookies after sign-out)
+    try {
+      const cookies = (res as any).cookies?.getAll?.() || []
+      for (const c of cookies) {
+        redirectRes.cookies.set({
+          name: c.name,
+          value: c.value,
+          ...('path' in c ? { path: c.path } : {}),
+          ...('httpOnly' in c ? { httpOnly: c.httpOnly } : {}),
+          ...('expires' in c ? { expires: c.expires } : {}),
+          ...('maxAge' in c ? { maxAge: c.maxAge } : {}),
+          ...('sameSite' in c ? { sameSite: c.sameSite } : {}),
+          ...('secure' in c ? { secure: c.secure } : {}),
+          ...('domain' in c ? { domain: c.domain } : {}),
+        } as any)
+      }
+    } catch {}
+    return redirectRes
+  }
 
   // Refresh session if expired - required for Server Components
   const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
+  let user: any = null
+  // Avoid calling getUser during the code exchange route to prevent race conditions
+  const isAuthCallback = request.nextUrl.pathname.startsWith('/auth/callback')
+  if (session && !isAuthCallback) {
+    const { data: { user: verifiedUser } } = await supabase.auth.getUser()
+    user = verifiedUser ?? null
+  }
   const adminEmail = process.env.ADMIN_EMAIL
   const isAdmin = !!(
     user && (
@@ -20,32 +73,31 @@ export async function middleware(request: NextRequest) {
     )
   )
 
-  // Handle authentication
-  if (!session && !request.nextUrl.pathname.startsWith('/auth')) {
+  // Handle authentication: require a verified user for all non-auth paths
+  if (!user && !request.nextUrl.pathname.startsWith('/auth')) {
     const redirectUrl = new URL('/auth', request.url)
     redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
-    return NextResponse.redirect(redirectUrl)
+    return redirectWithCookies(redirectUrl)
   }
   // If already authenticated and on /auth, send to intended page or home
-  if (session && request.nextUrl.pathname.startsWith('/auth')) {
+  if (user && request.nextUrl.pathname === '/auth') {
     const dest = request.nextUrl.searchParams.get('redirectTo') || '/'
-    return NextResponse.redirect(new URL(dest, request.url))
+    return redirectWithCookies(new URL(dest, request.url))
   }
 
   // Protect admin-only routes
   if (request.nextUrl.pathname.startsWith('/admin')) {
-    if (!session) {
+    if (!user) {
       const redirectUrl = new URL('/auth', request.url)
       redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
-      return NextResponse.redirect(redirectUrl)
+      return redirectWithCookies(redirectUrl)
     }
     if (!isAdmin) {
-      return NextResponse.redirect(new URL('/', request.url))
+      return redirectWithCookies(new URL('/', request.url))
     }
   }
 
   // Security headers
-  const nonce = crypto.randomUUID()
   // Allow Supabase network calls (REST, Auth, Realtime) in dev/prod
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseOrigin = (() => {
@@ -81,44 +133,23 @@ export async function middleware(request: NextRequest) {
     upgrade-insecure-requests;
   `
 
-  // Apply security headers (to request for internal handlers)
-  const requestHeaders = new Headers(request.headers)
-  requestHeaders.set('x-nonce', nonce)
-  requestHeaders.set('Content-Security-Policy', cspHeader.replace(/\s{2,}/g, ' ').trim())
-  requestHeaders.set('X-Frame-Options', 'DENY')
-  requestHeaders.set('X-Content-Type-Options', 'nosniff')
-  requestHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  requestHeaders.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  // Also forward role to route handlers
-  if (isAdmin) {
-    requestHeaders.set('x-user-role', 'admin')
-  } else if (session) {
-    requestHeaders.set('x-user-role', 'user')
+  // Also forward role to route handlers (via request headers)
+  if (isAdmin && !request.nextUrl.pathname.startsWith('/auth')) {
+    res.headers.set('x-user-role', 'admin')
+    // Mirror to request headers so server components can read it via headers()
+    // Note: request headers override was set at construction time above
+  } else if (session && !request.nextUrl.pathname.startsWith('/auth')) {
+    res.headers.set('x-user-role', 'user')
   }
+  // Set security headers on the response so the browser enforces them
+  res.headers.set('Content-Security-Policy', cspHeader.replace(/\s{2,}/g, ' ').trim())
+  res.headers.set('X-Frame-Options', 'DENY')
+  res.headers.set('X-Content-Type-Options', 'nosniff')
+  res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  res.headers.set('x-nonce', nonce)
 
-  // Update response headers
-  const response = NextResponse.next({
-    request: {
-      headers: requestHeaders,
-    },
-  })
-
-  // Mirror headers on the response so the browser enforces them
-  response.headers.set('x-nonce', nonce)
-  response.headers.set('Content-Security-Policy', cspHeader.replace(/\s{2,}/g, ' ').trim())
-  response.headers.set('X-Frame-Options', 'DENY')
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-
-  // Pass role information downstream if needed by server components
-  if (isAdmin) {
-    response.headers.set('x-user-role', 'admin')
-  } else if (session) {
-    response.headers.set('x-user-role', 'user')
-  }
-
-  return response
+  return res
 }
 
 export const config = {

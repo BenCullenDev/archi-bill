@@ -1,31 +1,16 @@
 import Link from 'next/link'
-import { cookies } from 'next/headers'
-import { createServerComponentClient, createServerActionClient } from '@supabase/auth-helpers-nextjs'
-import { Button } from '@/components/ui/button'
-import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
+import SignOutButton from '@/components/SignOutButton'
 
 export default async function Header() {
-  const cookieStore = await cookies() as any
-  const supabase = createServerComponentClient({ cookies: () => cookieStore })
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  if (!session) {
+  const h = await headers()
+  if (h.get('x-hide-header') === '1') return null
+  const role = h.get('x-user-role')
+  if (!role) {
     // No header when not authenticated (keeps /auth minimal)
     return null
   }
-
-  const email = session.user.email || ''
-  const isAdmin = !!(process.env.ADMIN_EMAIL && email.toLowerCase() === process.env.ADMIN_EMAIL.toLowerCase())
-
-  async function signOut() {
-    'use server'
-    const cookieStore = await cookies() as any
-    const supabase = createServerActionClient({ cookies: () => cookieStore })
-    await supabase.auth.signOut()
-    redirect('/auth')
-  }
+  const isAdmin = role === 'admin'
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/60 backdrop-blur supports-[backdrop-filter]:bg-background/40">
@@ -42,10 +27,7 @@ export default async function Header() {
           </nav>
         </div>
         <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-muted-foreground md:block">{email}</span>
-          <form action={signOut}>
-            <Button type="submit" variant="outline" size="sm">Sign out</Button>
-          </form>
+          <SignOutButton />
         </div>
       </div>
     </header>

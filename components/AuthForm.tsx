@@ -48,7 +48,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
       if (Array.isArray(identities) && identities.length === 0) {
         setError('An account with this email already exists. Please Sign In instead.')
       } else {
-        setMessage('Check your email for the confirmation link.')
+        setMessage('Check your email to confirm your address, then return here and Sign In.')
       }
     }
     setIsLoading(false)
@@ -56,6 +56,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
+  if (isLoading || !email || !password) return
     setIsLoading(true)
   setError(null)
   setMessage(null)
@@ -82,36 +83,41 @@ export function AuthForm({ initialError }: AuthFormProps) {
         <CardDescription>Sign in or create a new account</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <Input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-    <div className="flex flex-col space-y-2">
-          <Button
-            onClick={handleSignIn}
-      disabled={isLoading || !email || !password}
-            variant="default"
-          >
-            {isLoading ? 'Signing in…' : 'Sign In'}
-          </Button>
-          <Button
-            onClick={handleSignUp}
-      disabled={isLoading || !email || !password}
-            variant="outline"
-          >
-            {isLoading ? 'Signing up…' : 'Sign Up'}
-          </Button>
-        </div>
-    {error && <p className="text-sm text-destructive">{error}</p>}
-    {message && <p className="text-sm text-muted-foreground">{message}</p>}
+        <form onSubmit={handleSignIn} className="space-y-4" noValidate>
+          <Input
+            type="email"
+            placeholder="Email"
+            value={email}
+            autoComplete="email"
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <Input
+            type="password"
+            placeholder="Password"
+            value={password}
+            autoComplete="current-password"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <div className="flex flex-col space-y-2">
+            <Button
+              type="submit"
+              disabled={isLoading || !email || !password}
+              variant="default"
+            >
+              {isLoading ? 'Signing in…' : 'Sign In'}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSignUp}
+              disabled={isLoading || !email || !password}
+              variant="outline"
+            >
+              {isLoading ? 'Signing up…' : 'Sign Up'}
+            </Button>
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          {message && <p className="text-sm text-muted-foreground">{message}</p>}
+        </form>
       </CardContent>
     </Card>
   )

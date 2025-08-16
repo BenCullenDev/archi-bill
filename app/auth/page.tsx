@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { AuthForm } from '@/components/AuthForm'
 import { useSearchParams } from 'next/navigation'
 
@@ -12,6 +12,9 @@ function AuthContent() {
 }
 
 export default function AuthPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
   return (
     <div className="min-h-screen flex items-center justify-center">
       <Suspense fallback={<div>Loading...</div>}>
