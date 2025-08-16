@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 
-export default function AuthCallbackPage() {
+function CallbackInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -62,9 +62,17 @@ export default function AuthCallbackPage() {
     return () => { active = false }
   }, [router, searchParams])
 
+  return null
+}
+
+export const dynamic = 'force-dynamic'
+
+export default function AuthCallbackPage() {
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <p>Finishing up authentication…</p>
+      <Suspense fallback={<p>Finishing up authentication…</p>}>
+        <CallbackInner />
+      </Suspense>
     </div>
   )
 }
