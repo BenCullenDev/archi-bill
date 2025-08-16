@@ -20,7 +20,7 @@ function CallbackInner() {
         dest.searchParams.set('error', 'Session error')
         const redirectTo = searchParams.get('redirectTo') || '/'
         dest.searchParams.set('redirectTo', redirectTo)
-        router.replace(dest.toString())
+        window.location.replace(dest.toString())
         return
       }
 
@@ -30,8 +30,7 @@ function CallbackInner() {
       // Quick check if user is already available
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        router.replace(redirectTo)
-        router.refresh()
+        window.location.replace(redirectTo)
         return
       }
 
@@ -54,9 +53,8 @@ function CallbackInner() {
           }
         })
       })
-      if (!active) return
-      router.replace(redirectTo)
-      router.refresh()
+  if (!active) return
+  window.location.replace(redirectTo)
     }
     run()
     return () => { active = false }
