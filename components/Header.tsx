@@ -27,9 +27,12 @@ export default async function Header() {
           </nav>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/practice" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Practice</Link>
+          <Link href="/account" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Account</Link>
           <SignOutButton />
         </div>
       </div>
     </header>
   )
 }
+

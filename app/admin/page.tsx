@@ -1,4 +1,4 @@
-import { inArray, desc } from 'drizzle-orm'
+import { inArray, desc, eq, sql } from 'drizzle-orm'
 import { AdminDashboard } from '@/components/admin/admin-dashboard'
 import { getSupabaseAdminClient } from '@/lib/supabase/admin'
 import { db, schema } from '@/db'
@@ -21,6 +21,26 @@ type AuditLogEntry = {
   actorUserId: string | null
   targetUserId: string | null
   metadata: Record<string, unknown>
+}
+
+type PracticeMemberSummary = {
+  userId: string
+  fullName: string
+  role: string
+  joinedAt: string
+}
+
+type PracticeSummary = {
+  id: string
+  name: string
+  slug: string
+  billingEmail: string | null
+  currency: string
+  timezone: string
+  memberCount: number
+  createdAt: string
+  updatedAt: string
+  members: PracticeMemberSummary[]
 }
 
 export const dynamic = 'force-dynamic'
@@ -110,16 +130,80 @@ async function fetchAuditLogs(): Promise<AuditLogEntry[]> {
   }))
 }
 
+async function fetchPractices(): Promise<PracticeSummary[]> {
+  const practiceRows = await db
+    .select({
+      id: schema.practices.id,
+      name: schema.practices.name,
+      slug: schema.practices.slug,
+      billingEmail: schema.practices.billingEmail,
+      currency: schema.practices.currency,
+      timezone: schema.practices.timezone,
+      createdAt: schema.practices.createdAt,
+      updatedAt: schema.practices.updatedAt,
+      memberCount: sql<number>`count(${schema.practiceMembers.id})`,
+    })
+    .from(schema.practices)
+    .leftJoin(schema.practiceMembers, eq(schema.practiceMembers.practiceId, schema.practices.id))
+    .groupBy(schema.practices.id)
+    .orderBy(desc(schema.practices.createdAt))
+
+  if (practiceRows.length === 0) {
+    return []
+  }
+
+  const practiceIds = practiceRows.map((row) => row.id)
+
+  const memberRows = await db
+    .select({
+      practiceId: schema.practiceMembers.practiceId,
+      userId: schema.practiceMembers.userId,
+      role: schema.practiceMembers.role,
+      joinedAt: schema.practiceMembers.createdAt,
+      fullName: schema.profiles.fullName,
+    })
+    .from(schema.practiceMembers)
+    .leftJoin(schema.profiles, eq(schema.profiles.userId, schema.practiceMembers.userId))
+    .where(inArray(schema.practiceMembers.practiceId, practiceIds))
+
+  const membersByPractice = new Map<string, PracticeMemberSummary[]>()
+  for (const row of memberRows) {
+    const collection = membersByPractice.get(row.practiceId) ?? []
+    collection.push({
+      userId: row.userId,
+      role: row.role,
+      fullName: row.fullName ?? '-',
+      joinedAt: formatDate(row.joinedAt),
+    })
+    membersByPractice.set(row.practiceId, collection)
+  }
+
+  return practiceRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    billingEmail: row.billingEmail ?? null,
+    currency: row.currency ?? 'GBP',
+    timezone: row.timezone ?? '-',
+    memberCount: Number(row.memberCount ?? 0),
+    createdAt: formatDate(row.createdAt),
+    updatedAt: formatDate(row.updatedAt),
+    members: membersByPractice.get(row.id) ?? [],
+  }))
+}
 export default async function AdminPage() {
   let users: AdminUser[] = []
   let auditLogs: AuditLogEntry[] = []
+  let practices: PracticeSummary[] = []
   let error: string | null = null
 
   try {
-    ;[users, auditLogs] = await Promise.all([fetchUsers(), fetchAuditLogs()])
+    ;[users, auditLogs, practices] = await Promise.all([fetchUsers(), fetchAuditLogs(), fetchPractices()])
   } catch (err) {
-    error = err instanceof Error ? err.message : 'Failed to load user list'
+    error = err instanceof Error ? err.message : 'Failed to load admin data'
   }
 
-  return <AdminDashboard users={users} auditLogs={auditLogs} error={error} />
+  return <AdminDashboard users={users} auditLogs={auditLogs} practices={practices} error={error} />
 }
+
+

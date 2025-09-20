@@ -1,5 +1,7 @@
 "use server"
 
+import { eq, and, sql } from 'drizzle-orm'
+
 import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
@@ -155,3 +157,86 @@ export async function sendPasswordResetAction(input: {
     return { status: 'error', message, token: randomUUID() }
   }
 }
+
+
+export async function updatePracticeMemberRoleAction(input: {
+  practiceId: string
+  memberUserId: string
+  role: 'owner' | 'admin' | 'member' | 'viewer'
+}): Promise<ActionResult> {
+  const { practiceId, memberUserId, role } = input
+
+  if (!['owner', 'admin', 'member', 'viewer'].includes(role)) {
+    return { status: 'error', message: 'Invalid role', token: randomUUID() }
+  }
+
+  const { actorId, actorEmail } = await getActorContext()
+
+  const existingRows = await db
+    .select({ role: schema.practiceMembers.role })
+    .from(schema.practiceMembers)
+    .where(
+      and(
+        eq(schema.practiceMembers.practiceId, practiceId),
+        eq(schema.practiceMembers.userId, memberUserId)
+      )
+    )
+    .limit(1)
+
+  const existing = existingRows[0]
+  if (!existing) {
+    return { status: 'error', message: 'Member not found', token: randomUUID() }
+  }
+
+  if (existing.role === role) {
+    return { status: 'success', message: `Role already set to ${role}`, token: randomUUID() }
+  }
+
+  if (existing.role === 'owner' && role !== 'owner') {
+    const owners = await db
+      .select({ count: sql<number>`count(${schema.practiceMembers.id})` })
+      .from(schema.practiceMembers)
+      .where(
+        and(
+          eq(schema.practiceMembers.practiceId, practiceId),
+          eq(schema.practiceMembers.role, 'owner')
+        )
+      )
+      .limit(1)
+    const ownerCount = Number(owners[0]?.count ?? 0)
+    if (ownerCount <= 1) {
+      return { status: 'error', message: 'A practice must have at least one owner', token: randomUUID() }
+    }
+  }
+
+  await db
+    .update(schema.practiceMembers)
+    .set({ role })
+    .where(
+      and(
+        eq(schema.practiceMembers.practiceId, practiceId),
+        eq(schema.practiceMembers.userId, memberUserId)
+      )
+    )
+
+  await db.insert(schema.adminAuditLogs).values({
+    action: 'practice_member_role_updated',
+    actorUserId: actorId,
+    targetUserId: memberUserId,
+    metadata: {
+      actorEmail,
+      practiceId,
+      previousRole: existing.role,
+      newRole: role,
+    },
+  })
+
+  await revalidatePath('/admin')
+  await revalidatePath('/practice')
+
+  return { status: 'success', message: `Member role updated to ${role}`, token: randomUUID() }
+}
+
+
+
+
