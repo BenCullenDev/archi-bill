@@ -118,6 +118,14 @@ export function AuthForm({ initialError }: AuthFormProps) {
           {error && <p className="text-sm text-destructive">{error}</p>}
           {message && <p className="text-sm text-muted-foreground">{message}</p>}
         </form>
+        <Button
+            type="button"
+            variant="link"
+            className="px-0 self-start text-sm"
+            onClick={() => router.push(`/auth/reset-password?redirectTo=${encodeURIComponent(redirectTo)}`)}
+          >
+            Forgot password?
+          </Button>
       </CardContent>
     </Card>
   )

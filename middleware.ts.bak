@@ -6,9 +6,7 @@ export async function middleware(request: NextRequest) {
   // If Supabase redirected back with an auth code to a non-callback path, forward it to the client callback page
   const urlWithCode = request.nextUrl
   const hasCode = urlWithCode.searchParams.has('code')
-  const isCallback = urlWithCode.pathname === '/auth/callback'
-  const isPasswordUpdate = urlWithCode.pathname === '/auth/update-password'
-  if (hasCode && !isCallback && !isPasswordUpdate) {
+  if (hasCode && urlWithCode.pathname !== '/auth/callback') {
     const dest = new URL('/auth/callback', request.url)
     // Preserve all existing params (code, state, type, etc.)
     urlWithCode.searchParams.forEach((v, k) => dest.searchParams.set(k, v))
