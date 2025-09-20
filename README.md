@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ArchiBill
 
-## Getting Started
+Billing platform for architecture practices built on Next.js, Supabase auth, and Drizzle ORM.
 
-First, run the development server:
+## Prerequisites
+
+- Node.js 20+
+- Supabase project (free tier is fine)
+- A Postgres connection string with pooling enabled (`?pgbouncer=true` recommended)
+
+## Environment setup
+
+1. Duplicate `.env.local` and fill in the secret values:
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` from the Supabase dashboard
+   - `SUPABASE_SERVICE_ROLE_KEY` (used for admin tasks only)
+   - `DATABASE_URL` in the format `postgresql://postgres:<password>@db.<project>.supabase.co:5432/postgres?pgbouncer=true&sslmode=require`
+2. Never expose the service-role key or database password client-side. Keep them server-only.
+
+## Drizzle workflow
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Generate SQL from the TypeScript schema (./db/schema.ts)
+npm run db:generate
+
+# Apply migrations to Supabase (requires DATABASE_URL)
+npm run db:migrate
+
+# Push schema directly (alternative to migrate)
+npm run db:push
+
+# Visual schema explorer
+npm run db:studio
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Generated SQL lives in `drizzle/`. Commit both the SQL files and the `meta/` snapshots so everyone stays in sync.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Database access in code
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`db/index.ts` exports a singleton Drizzle client that reuses a pooled connection and exposes the typed schema:
 
-## Learn More
+```ts
+import { db, schema } from '@/db'
+import { eq } from 'drizzle-orm'
 
-To learn more about Next.js, take a look at the following resources:
+async function listClients(practiceId: string) {
+  return db.select().from(schema.clients).where(eq(schema.clients.practiceId, practiceId))
+}
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Use this in server components, route handlers, or server actions. Avoid importing it in client components because it relies on a server-side Postgres connection.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Supabase auth bridge
 
-## Deploy on Vercel
+- Supabase handles authentication (`@supabase/auth-helpers-nextjs` is already wired up in `middleware.ts`).
+- The `profiles` table mirrors `auth.users`. Create a profile row after a new user signs up so you can join application data.
+- `practice_members` links users to practices with role-based access (`owner`, `admin`, `member`, `viewer`).
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Development
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm install
+npm run dev
+```
+
+Visit `http://localhost:3000` and sign in via Supabase auth to exercise guarded routes.
+
+## Next steps
+
+- Add onboarding logic to create a `practice` and `practice_member` record when a user signs up.
+- Build UI around `clients`, `projects`, and `invoices` using the generated Drizzle types.
+- Consider Row Level Security (RLS) policies in Supabase that mirror the schema constraints above.
+
