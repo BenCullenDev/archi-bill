@@ -19,6 +19,18 @@ const baseAppUrl =
 const resetRedirectUrl = `${baseAppUrl.replace(/\/$/, '')}/auth/update-password`
 const BAN_DURATION = '87600h'
 
+function getOptionalString(record: Record<string, unknown> | null, key: string): string | null {
+  if (!record || typeof record !== 'object') return null
+  const value = record[key]
+  return typeof value === 'string' ? value : null
+}
+
+function isUserBanned(record: Record<string, unknown> | null): boolean {
+  const banDuration = getOptionalString(record, 'ban_duration')
+  const bannedUntil = getOptionalString(record, 'banned_until')
+  return Boolean(banDuration && banDuration !== 'none') || Boolean(bannedUntil)
+}
+
 type ActorContext = {
   actorId: string | null
   actorEmail: string | null
@@ -46,7 +58,7 @@ export async function banUserAction(input: {
   const { userId, mode, email } = input
 
   if (!userId || (mode !== 'ban' && mode !== 'unban')) {
-    return { status: 'error', message: 'Invalid request' }
+    return { status: 'error', message: 'Invalid request', token: randomUUID() }
   }
 
   const supabaseAdmin = getSupabaseAdminClient()
@@ -59,8 +71,8 @@ export async function banUserAction(input: {
     if (error) throw error
 
     const updated = data.user as Record<string, unknown> | null
-    const banDuration = typeof updated?.['ban_duration'] === 'string' ? (updated['ban_duration'] as string) : null
-    const bannedUntil = typeof updated?.['banned_until'] === 'string' ? (updated['banned_until'] as string) : null
+    const banDuration = getOptionalString(updated, 'ban_duration')
+    const bannedUntil = getOptionalString(updated, 'banned_until')
 
     await db.insert(schema.adminAuditLogs).values({
       action: mode === 'ban' ? 'ban' : 'unban',
@@ -85,7 +97,7 @@ export async function banUserAction(input: {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to update user'
-    return { status: 'error', message }
+    return { status: 'error', message, token: randomUUID() }
   }
 }
 
@@ -96,11 +108,22 @@ export async function sendPasswordResetAction(input: {
   const { email, userId } = input
 
   if (!email) {
-    return { status: 'error', message: 'Missing email' }
+    return { status: 'error', message: 'Missing email', token: randomUUID() }
   }
 
   const supabaseAdmin = getSupabaseAdminClient()
   const { actorId, actorEmail } = await getActorContext()
+
+  if (userId) {
+    const { data: targetData, error: fetchError } = await supabaseAdmin.auth.admin.getUserById(userId)
+    if (fetchError) {
+      return { status: 'error', message: fetchError.message ?? 'Unable to load user', token: randomUUID() }
+    }
+    const targetRecord = targetData.user as Record<string, unknown> | null
+    if (isUserBanned(targetRecord)) {
+      return { status: 'error', message: 'Cannot send password reset for banned users', token: randomUUID() }
+    }
+  }
 
   try {
     const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {

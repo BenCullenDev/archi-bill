@@ -85,6 +85,10 @@ export function AdminDashboard({ users, auditLogs, error }: AdminDashboardProps)
   }
 
   const handleSendReset = async (user: AdminUser) => {
+    if (user.isBanned) {
+      showToast('error', 'Cannot send password reset for banned users')
+      return
+    }
     setPendingAction({ type: 'reset', userId: user.id })
     try {
       const result = await sendPasswordResetAction({
@@ -183,10 +187,10 @@ export function AdminDashboard({ users, auditLogs, error }: AdminDashboardProps)
                               type="button"
                               size="sm"
                               variant="secondary"
-                              disabled={isResetPending || isBanPending || user.email === '-' || isRefreshing}
+                              disabled={isResetPending || isBanPending || user.email === '-' || user.isBanned || isRefreshing}
                               onClick={() => handleSendReset(user)}
                             >
-                              {isResetPending ? 'Sending...' : 'Send reset'}
+                              {isResetPending ? 'Sending...' : user.isBanned ? 'Reset disabled' : 'Send reset'}
                             </Button>
                           </div>
                         </td>
@@ -275,3 +279,4 @@ export function AdminDashboard({ users, auditLogs, error }: AdminDashboardProps)
     </div>
   )
 }
+
