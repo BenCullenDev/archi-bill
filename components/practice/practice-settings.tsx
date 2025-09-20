@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { AdminToast } from '@/components/admin/admin-toast'
-import { updatePracticeAction, updatePracticeMemberRole } from '@/app/practice/actions'
+import { invitePracticeMember, updatePracticeAction, updatePracticeMemberRole } from '@/app/practice/actions'
 
 function generateToken() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -34,6 +34,13 @@ type PracticeSettingsProps = {
     role: string
     joinedAt: string
   }>
+  invites: Array<{
+    id: string
+    email: string
+    role: string
+    status: string
+    createdAt: string
+  }>
   currentUserId: string
   canEditPractice: boolean
   canManageMembers: boolean
@@ -48,6 +55,7 @@ type ToastState = {
 export default function PracticeSettings({
   practice,
   members,
+  invites,
   currentUserId,
   canEditPractice,
   canManageMembers,
@@ -60,6 +68,9 @@ export default function PracticeSettings({
   const [toast, setToast] = useState<ToastState | null>(null)
   const [isPending, startTransition] = useTransition()
   const [pendingMemberId, setPendingMemberId] = useState<string | null>(null)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<PracticeMemberRole>('member')
+  const [isInvitePending, setIsInvitePending] = useState(false)
 
   useEffect(() => {
     setName(practice.name)
@@ -131,6 +142,44 @@ export default function PracticeSettings({
         setToast({ status: 'error', message, token: generateToken() })
       } finally {
         setPendingMemberId(null)
+      }
+    })
+  }
+
+  const handleInviteSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canManageMembers) return
+
+    if (!inviteEmail.trim()) {
+      setToast({ status: 'error', message: 'Invite email is required', token: generateToken() })
+      return
+    }
+
+    setIsInvitePending(true)
+    startTransition(async () => {
+      try {
+        const result = await invitePracticeMember({
+          practiceId: practice.id,
+          email: inviteEmail,
+          role: inviteRole,
+        })
+        if (result) {
+          setToast({
+            status: result.status,
+            message: result.message,
+            token: result.token ?? generateToken(),
+          })
+          if (result.status === 'success') {
+            setInviteEmail('')
+            setInviteRole('member')
+            router.refresh()
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to send invite'
+        setToast({ status: 'error', message, token: generateToken() })
+      } finally {
+        setIsInvitePending(false)
       }
     })
   }
@@ -219,6 +268,50 @@ export default function PracticeSettings({
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
+          {canManageMembers && (
+            <form
+              className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto] md:items-end"
+              onSubmit={handleInviteSubmit}
+            >
+              <div className="grid gap-2">
+                <label htmlFor="invite-email" className="text-sm font-medium text-muted-foreground">
+                  Invite email
+                </label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  placeholder="person@example.com"
+                  disabled={isInvitePending}
+                />
+              </div>
+              <div className="grid gap-2">
+                <label htmlFor="invite-role" className="text-sm font-medium text-muted-foreground">
+                  Role
+                </label>
+                <select
+                  id="invite-role"
+                  className="min-w-[140px] rounded border bg-background px-2 py-1"
+                  value={inviteRole}
+                  onChange={(event) => setInviteRole(event.target.value as PracticeMemberRole)}
+                  disabled={isInvitePending}
+                >
+                  {ROLE_OPTIONS.map((roleOption) => (
+                    <option key={roleOption} value={roleOption}>
+                      {roleOption.charAt(0).toUpperCase() + roleOption.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-end">
+                <Button type="submit" disabled={isInvitePending || inviteEmail.trim().length === 0}>
+                  {isInvitePending ? 'Sending...' : 'Send invite'}
+                </Button>
+              </div>
+            </form>
+          )}
+
           {sortedMembers.length === 0 ? (
             <p className="text-sm text-muted-foreground">No members yet.</p>
           ) : (
@@ -262,6 +355,34 @@ export default function PracticeSettings({
                 })}
               </tbody>
             </table>
+          )}
+
+          {invites.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-medium text-muted-foreground">Invitations</h3>
+              <table className="mt-2 min-w-full text-sm">
+                <thead className="border-b text-left text-muted-foreground">
+                  <tr>
+                    <th className="py-2 pr-4">Email</th>
+                    <th className="py-2 pr-4">Role</th>
+                    <th className="py-2 pr-4">Status</th>
+                    <th className="py-2">Sent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invites.map((invite) => (
+                    <tr key={invite.id} className="border-b last:border-none">
+                      <td className="py-2 pr-4">{invite.email}</td>
+                      <td className="py-2 pr-4">
+                        {invite.role.charAt(0).toUpperCase() + invite.role.slice(1)}
+                      </td>
+                      <td className="py-2 pr-4 text-muted-foreground">{invite.status}</td>
+                      <td className="py-2 text-muted-foreground">{invite.createdAt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>

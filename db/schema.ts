@@ -56,6 +56,28 @@ export const practiceMembers = pgTable('practice_members', {
   userIdx: index('practice_members_user_idx').on(table.userId),
 }))
 
+
+export const practiceInvites = pgTable('practice_invites', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  practiceId: uuid('practice_id')
+    .notNull()
+    .references(() => practices.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  role: memberRoleEnum('role').notNull().default('member'),
+  invitedByUserId: uuid('invited_by_user_id').references(() => profiles.userId, {
+    onDelete: 'set null',
+  }),
+  supabaseUserId: uuid('supabase_user_id'),
+  token: text('token').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => ({
+  practiceIdx: index('practice_invites_practice_idx').on(table.practiceId),
+  emailIdx: index('practice_invites_email_idx').on(table.email),
+  tokenIdx: uniqueIndex('practice_invites_token_key').on(table.token),
+}))
+
 export const clients = pgTable('clients', {
   id: uuid('id').defaultRandom().primaryKey(),
   practiceId: uuid('practice_id').notNull().references(() => practices.id, { onDelete: 'cascade' }),
@@ -136,6 +158,7 @@ export const invoiceLineItems = pgTable('invoice_line_items', {
 
 export const practicesRelations = relations(practices, ({ many }) => ({
   members: many(practiceMembers),
+  invites: many(practiceInvites),
   clients: many(clients),
   projects: many(projects),
   invoices: many(invoices),
@@ -156,6 +179,17 @@ export const practiceMembersRelations = relations(practiceMembers, ({ one }) => 
   }),
   profile: one(profiles, {
     fields: [practiceMembers.userId],
+    references: [profiles.userId],
+  }),
+}))
+
+export const practiceInvitesRelations = relations(practiceInvites, ({ one }) => ({
+  practice: one(practices, {
+    fields: [practiceInvites.practiceId],
+    references: [practices.id],
+  }),
+  inviter: one(profiles, {
+    fields: [practiceInvites.invitedByUserId],
     references: [profiles.userId],
   }),
 }))
@@ -217,6 +251,7 @@ export type Practice = typeof practices.$inferSelect
 export type NewPractice = typeof practices.$inferInsert
 export type Profile = typeof profiles.$inferSelect
 export type PracticeMember = typeof practiceMembers.$inferSelect
+export type PracticeInvite = typeof practiceInvites.$inferSelect
 export type Client = typeof clients.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Invoice = typeof invoices.$inferSelect

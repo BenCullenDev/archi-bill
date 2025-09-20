@@ -15,6 +15,34 @@
       "when": 1758365526704,
       "tag": "0001_stormy_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1758388481759,
+      "tag": "0002_practice_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1758389672788,
+      "tag": "0003_lame_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1758389750275,
+      "tag": "0003_practice_invites_practice_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1758389750275,
+      "tag": "0004_practice_invites_email_idx",
+      "breakpoints": true
     }
   ]
 }

@@ -6,12 +6,19 @@ import { cookies } from 'next/headers'
 import { eq, and, sql } from 'drizzle-orm'
 import { createServerActionClient } from '@supabase/auth-helpers-nextjs'
 import { db, schema } from '@/db'
+import { getSupabaseAdminClient } from '@/lib/supabase/admin'
 
 export type PracticeActionResult = {
   status: 'success' | 'error'
   message: string
   token?: string
 }
+
+const baseAppUrl =
+  process.env.NEXT_PUBLIC_APP_URL || process.env.SITE_URL || 'http://localhost:3000'
+
+const inviteRedirectUrl = `${baseAppUrl.replace(/\/$/, '')}/auth`
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function sanitizeInput(value: string | undefined | null, maxLength: number, { toLowerCase = false } = {}) {
   if (!value) return ''
@@ -193,7 +200,171 @@ export async function updatePracticeAction(input: {
 
 const MEMBER_ROLE_OPTIONS = ['owner', 'admin', 'member', 'viewer'] as const
 
+
 type PracticeMemberRole = typeof MEMBER_ROLE_OPTIONS[number]
+
+export async function invitePracticeMember(input: {
+  practiceId: string
+  email: string
+  role: PracticeMemberRole
+}): Promise<PracticeActionResult> {
+  const { user, error } = await getAuthContext()
+  if (error || !user) {
+    return { status: 'error', message: 'Not authenticated', token: randomUUID() }
+  }
+
+  const practiceId = input.practiceId
+  const email = sanitizeInput(input.email, 320, { toLowerCase: true })
+  const role = input.role
+
+  if (!email || !EMAIL_REGEX.test(email)) {
+    return { status: 'error', message: 'Please provide a valid email address', token: randomUUID() }
+  }
+
+  if (!MEMBER_ROLE_OPTIONS.includes(role)) {
+    return { status: 'error', message: 'Invalid role', token: randomUUID() }
+  }
+
+  const ownerMembership = await db
+    .select({ role: schema.practiceMembers.role })
+    .from(schema.practiceMembers)
+    .where(
+      and(
+        eq(schema.practiceMembers.practiceId, practiceId),
+        eq(schema.practiceMembers.userId, user.id)
+      )
+    )
+    .limit(1)
+
+  if (!ownerMembership.length || ownerMembership[0].role !== 'owner') {
+    return { status: 'error', message: 'Only practice owners can invite new members', token: randomUUID() }
+  }
+
+  const existingInvites = await db
+    .select({
+      id: schema.practiceInvites.id,
+      acceptedAt: schema.practiceInvites.acceptedAt,
+      revokedAt: schema.practiceInvites.revokedAt,
+    })
+    .from(schema.practiceInvites)
+    .where(
+      and(
+        eq(schema.practiceInvites.practiceId, practiceId),
+        eq(schema.practiceInvites.email, email)
+      )
+    )
+
+  const hasActiveInvite = existingInvites.some((invite) => !invite.acceptedAt && !invite.revokedAt)
+  if (hasActiveInvite) {
+    return { status: 'error', message: 'An invitation has already been sent to this email', token: randomUUID() }
+  }
+
+  const supabaseAdmin = getSupabaseAdminClient()
+
+  type SupabaseUser = {
+    id: string
+    email?: string | null
+    confirmed_at?: string | null
+    email_confirmed_at?: string | null
+  }
+
+  let invitedUser: SupabaseUser | null = null
+  let inviteSent = false
+
+  try {
+    const response = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+      redirectTo: inviteRedirectUrl,
+    })
+
+    if (response.error) {
+      const message = response.error.message ?? 'Unable to send invitation'
+      if (message.toLowerCase().includes('already registered')) {
+        const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 })
+        if (listError) {
+          return {
+            status: 'error',
+            message: listError.message ?? 'Unable to locate existing user',
+            token: randomUUID(),
+          }
+        }
+        const users = listData?.users ?? []
+        invitedUser = (users.find((candidate) => (candidate.email ?? '').toLowerCase() === email) as SupabaseUser) ?? null
+        if (!invitedUser) {
+          return {
+            status: 'error',
+            message: 'User is already registered but could not be found',
+            token: randomUUID(),
+          }
+        }
+      } else {
+        return { status: 'error', message, token: randomUUID() }
+      }
+    } else {
+      invitedUser = (response.data?.user ?? null) as SupabaseUser | null
+      inviteSent = true
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unable to send invitation'
+    return { status: 'error', message, token: randomUUID() }
+  }
+
+  if (!invitedUser) {
+    return { status: 'error', message: 'Unable to prepare invitation', token: randomUUID() }
+  }
+
+  const existingMembership = await db
+    .select({ id: schema.practiceMembers.id })
+    .from(schema.practiceMembers)
+    .where(
+      and(
+        eq(schema.practiceMembers.practiceId, practiceId),
+        eq(schema.practiceMembers.userId, invitedUser.id)
+      )
+    )
+    .limit(1)
+
+  if (existingMembership.length) {
+    return { status: 'error', message: 'This user is already a member of the practice', token: randomUUID() }
+  }
+
+  await db
+    .insert(schema.practiceMembers)
+    .values({
+      practiceId,
+      userId: invitedUser.id,
+      role,
+      invitedBy: user.id,
+    })
+    .onConflictDoNothing()
+
+  await db
+    .insert(schema.profiles)
+    .values({
+      userId: invitedUser.id,
+      defaultPracticeId: practiceId,
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing()
+
+  const confirmedAt = invitedUser.confirmed_at ?? invitedUser.email_confirmed_at ?? null
+  const token = randomUUID()
+
+  await db.insert(schema.practiceInvites).values({
+    practiceId,
+    email,
+    role,
+    invitedByUserId: user.id,
+    supabaseUserId: invitedUser.id,
+    token,
+    acceptedAt: confirmedAt ? new Date(confirmedAt) : null,
+  })
+
+  await revalidatePath('/practice')
+  await revalidatePath('/admin')
+
+  const message = inviteSent ? `Invitation sent to ${email}` : `Added ${email} to the practice`
+  return { status: 'success', message, token: randomUUID() }
+}
 
 export async function updatePracticeMemberRole(input: {
   practiceId: string

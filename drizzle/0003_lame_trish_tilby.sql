@@ -1,0 +1,1 @@
+ALTER TABLE "practice_invites" ALTER COLUMN "role" SET DEFAULT 'member';

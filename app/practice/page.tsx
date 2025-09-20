@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createServerActionClient } from '@supabase/auth-helpers-nextjs'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { db, schema } from '@/db'
 import { getSupabaseAdminClient } from '@/lib/supabase/admin'
 import CreatePracticeForm from '@/components/practice/create-practice-form'
@@ -88,6 +88,31 @@ export default async function PracticePage() {
     joinedAt: formatDate(row.joinedAt),
   }))
 
+  const inviteRows = await db
+    .select({
+      id: schema.practiceInvites.id,
+      email: schema.practiceInvites.email,
+      role: schema.practiceInvites.role,
+      createdAt: schema.practiceInvites.createdAt,
+      acceptedAt: schema.practiceInvites.acceptedAt,
+      revokedAt: schema.practiceInvites.revokedAt,
+    })
+    .from(schema.practiceInvites)
+    .where(eq(schema.practiceInvites.practiceId, practice.id))
+    .orderBy(desc(schema.practiceInvites.createdAt))
+
+  const invites = inviteRows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    status: row.revokedAt
+      ? 'Revoked'
+      : row.acceptedAt
+        ? 'Accepted'
+        : 'Pending',
+    createdAt: formatDate(row.createdAt),
+  }))
+
   const canEditPractice = membershipRole === 'owner' || membershipRole === 'admin'
   const canManageMembers = membershipRole === 'owner'
 
@@ -104,6 +129,7 @@ export default async function PracticePage() {
             timezone: practice.timezone,
           }}
           members={members}
+          invites={invites}
           currentUserId={user.id}
           canEditPractice={canEditPractice}
           canManageMembers={canManageMembers}
