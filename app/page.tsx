@@ -1,13 +1,10 @@
-'use client'
+﻿'use client'
 
-import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useAuthUser } from '@/lib/hooks/useAuthUser'
 
 export default function Home() {
   const { user, loading } = useAuthUser()
-  const router = useRouter()
-
   // Sign out and admin link are handled by the Header component
 
   return (
@@ -39,3 +36,4 @@ export default function Home() {
     </div>
   )
 }
+

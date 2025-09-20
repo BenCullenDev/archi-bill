@@ -8,6 +8,13 @@
       "when": 1758358075483,
       "tag": "0000_remarkable_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1758365526704,
+      "tag": "0001_stormy_living_lightning",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
@@ -44,7 +44,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
       }
     } else {
       // Supabase sometimes returns a user with empty identities array when email already exists
-      const identities = (data as any)?.user?.identities as Array<any> | undefined
+      const identities = data.user?.identities ?? null
       if (Array.isArray(identities) && identities.length === 0) {
         setError('An account with this email already exists. Please Sign In instead.')
       } else {
@@ -104,7 +104,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
               disabled={isLoading || !email || !password}
               variant="default"
             >
-              {isLoading ? 'Signing in…' : 'Sign In'}
+              {isLoading ? 'Signing inâ€¦' : 'Sign In'}
             </Button>
             <Button
               type="button"
@@ -112,7 +112,7 @@ export function AuthForm({ initialError }: AuthFormProps) {
               disabled={isLoading || !email || !password}
               variant="outline"
             >
-              {isLoading ? 'Signing up…' : 'Sign Up'}
+              {isLoading ? 'Signing upâ€¦' : 'Sign Up'}
             </Button>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
@@ -130,3 +130,5 @@ export function AuthForm({ initialError }: AuthFormProps) {
     </Card>
   )
 }
+
+

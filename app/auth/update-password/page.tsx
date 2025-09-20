@@ -25,21 +25,45 @@ export default function UpdatePasswordPage() {
     const run = async () => {
       const url = new URL(window.location.href)
       const hashParams = new URLSearchParams(url.hash ? url.hash.slice(1) : '')
-      const hasCode = url.searchParams.has('code') || hashParams.has('code')
-      const type = url.searchParams.get('type') || hashParams.get('type')
+      const getParam = (key: string) => url.searchParams.get(key) ?? hashParams.get(key) ?? undefined
+      const type = getParam('type')
+      const code = getParam('code')
+      const accessToken = getParam('access_token')
+      const refreshToken = getParam('refresh_token')
 
-      if (hasCode && type === 'recovery') {
-        const { error } = await supabase.auth.exchangeCodeForSession(url.href)
-        if (!active) return
-        if (error) {
-          setError(error.message ?? 'Password reset link is invalid or expired.')
-          setVerifying(false)
-          return
+      let sessionExchanged = false
+
+      if (type === 'recovery') {
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(url.href)
+          if (!active) return
+          if (error) {
+            setError(error.message ?? 'Password reset link is invalid or expired.')
+            setVerifying(false)
+            return
+          }
+          sessionExchanged = true
+        } else if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          })
+          if (!active) return
+          if (error) {
+            setError(error.message ?? 'Password reset link is invalid or expired.')
+            setVerifying(false)
+            return
+          }
+          sessionExchanged = true
         }
+      }
 
+      if (sessionExchanged) {
         const cleaned = new URL(window.location.href)
         cleaned.searchParams.delete('code')
         cleaned.searchParams.delete('type')
+        cleaned.searchParams.delete('access_token')
+        cleaned.searchParams.delete('refresh_token')
         cleaned.hash = ''
         window.history.replaceState({}, document.title, cleaned.toString())
       }

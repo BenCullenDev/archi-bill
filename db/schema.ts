@@ -10,6 +10,7 @@ import {
   date,
   uniqueIndex,
   index,
+  json,
 } from 'drizzle-orm/pg-core'
 
 export const memberRoleEnum = pgEnum('member_role', ['owner', 'admin', 'member', 'viewer'])
@@ -203,6 +204,15 @@ export const invoiceLineItemsRelations = relations(invoiceLineItems, ({ one }) =
   }),
 }))
 
+export const adminAuditLogs = pgTable('admin_audit_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  action: text('action').notNull(),
+  actorUserId: uuid('actor_user_id'),
+  targetUserId: uuid('target_user_id'),
+  metadata: json('metadata').$type<Record<string, unknown> | null>().default(null),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(sql`now()`),
+})
+
 export type Practice = typeof practices.$inferSelect
 export type NewPractice = typeof practices.$inferInsert
 export type Profile = typeof profiles.$inferSelect
@@ -211,4 +221,5 @@ export type Client = typeof clients.$inferSelect
 export type Project = typeof projects.$inferSelect
 export type Invoice = typeof invoices.$inferSelect
 export type InvoiceLineItem = typeof invoiceLineItems.$inferSelect
-
+export type AdminAuditLog = typeof adminAuditLogs.$inferSelect
+export type NewAdminAuditLog = typeof adminAuditLogs.$inferInsert
