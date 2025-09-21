@@ -94,6 +94,7 @@ export default async function PracticePage() {
       email: schema.practiceInvites.email,
       role: schema.practiceInvites.role,
       createdAt: schema.practiceInvites.createdAt,
+      lastSentAt: schema.practiceInvites.lastSentAt,
       acceptedAt: schema.practiceInvites.acceptedAt,
       revokedAt: schema.practiceInvites.revokedAt,
     })
@@ -111,6 +112,7 @@ export default async function PracticePage() {
         ? 'Accepted'
         : 'Pending',
     createdAt: formatDate(row.createdAt),
+    lastSentAt: formatDate(row.lastSentAt ?? row.createdAt),
   }))
 
   const canEditPractice = membershipRole === 'owner' || membershipRole === 'admin'

@@ -70,6 +70,7 @@ export const practiceInvites = pgTable('practice_invites', {
   supabaseUserId: uuid('supabase_user_id'),
   token: text('token').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull().defaultNow(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, (table) => ({

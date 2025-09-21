@@ -43,6 +43,13 @@
       "when": 1758389750275,
       "tag": "0004_practice_invites_email_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1758447100280,
+      "tag": "0005_practice_invites_last_sent",
+      "breakpoints": true
     }
   ]
 }

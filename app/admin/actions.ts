@@ -1,6 +1,6 @@
 "use server"
 
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, sql, inArray, isNull } from 'drizzle-orm'
 
 import { randomUUID } from 'crypto'
 import { revalidatePath } from 'next/cache'
@@ -39,7 +39,7 @@ type ActorContext = {
 }
 
 async function getActorContext(): Promise<ActorContext> {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   try {
     const supabase = createServerActionClient({ cookies: () => cookieStore })
     const { data } = await supabase.auth.getUser()
@@ -239,4 +239,150 @@ export async function updatePracticeMemberRoleAction(input: {
 
 
 
+
+
+
+export async function deleteUserAction(input: { userId: string }): Promise<ActionResult> {
+  const { userId } = input
+
+  if (!userId) {
+    return { status: 'error', message: 'User ID is required', token: randomUUID() }
+  }
+
+  const supabaseAdmin = getSupabaseAdminClient()
+  const { actorId, actorEmail } = await getActorContext()
+
+  if (actorId && actorId === userId) {
+    return { status: 'error', message: 'You cannot delete your own account', token: randomUUID() }
+  }
+
+  let targetEmail: string | null = null
+  let userWasFound = true
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId)
+    if (error) {
+      const message = error.message ?? 'Unable to load user details'
+      if (!message.toLowerCase().includes('not found')) {
+        return { status: 'error', message, token: randomUUID() }
+      }
+      userWasFound = false
+    } else {
+      targetEmail = (data?.user?.email ?? null) as string | null
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to load user details'
+    return { status: 'error', message, token: randomUUID() }
+  }
+
+  const memberships = await db
+    .select({
+      practiceId: schema.practiceMembers.practiceId,
+      role: schema.practiceMembers.role,
+      practiceName: schema.practices.name,
+    })
+    .from(schema.practiceMembers)
+    .leftJoin(schema.practices, eq(schema.practiceMembers.practiceId, schema.practices.id))
+    .where(eq(schema.practiceMembers.userId, userId))
+
+  const ownerPracticeIds = Array.from(
+    new Set(
+      memberships
+        .filter((membership) => membership.role === 'owner')
+        .map((membership) => membership.practiceId)
+        .filter((practiceId): practiceId is string => Boolean(practiceId))
+    )
+  )
+
+  if (ownerPracticeIds.length > 0) {
+    const ownerCounts = await db
+      .select({
+        practiceId: schema.practiceMembers.practiceId,
+        ownerCount: sql<number>`count(${schema.practiceMembers.id})`,
+      })
+      .from(schema.practiceMembers)
+      .where(
+        and(
+          inArray(schema.practiceMembers.practiceId, ownerPracticeIds),
+          eq(schema.practiceMembers.role, 'owner')
+        )
+      )
+      .groupBy(schema.practiceMembers.practiceId)
+
+    const ownerCountMap = new Map(ownerCounts.map((row) => [row.practiceId, Number(row.ownerCount ?? 0)]))
+    const soleOwnerPracticeIds = ownerPracticeIds.filter((practiceId) => (ownerCountMap.get(practiceId) ?? 0) <= 1)
+
+    if (soleOwnerPracticeIds.length > 0) {
+      const practiceRows = await db
+        .select({ id: schema.practices.id, name: schema.practices.name })
+        .from(schema.practices)
+        .where(inArray(schema.practices.id, soleOwnerPracticeIds))
+
+      const practiceNames = practiceRows.map((row) => row.name).filter((name): name is string => Boolean(name))
+      const list = practiceNames.length ? practiceNames.join(', ') : 'their practice'
+      return {
+        status: 'error',
+        message: `Cannot delete user while they are the sole owner of ${list}. Transfer ownership first.`,
+        token: randomUUID(),
+      }
+    }
+  }
+
+  try {
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId)
+    if (error) {
+      const message = error.message ?? 'Unable to delete user'
+      if (!message.toLowerCase().includes('not found')) {
+        return { status: 'error', message, token: randomUUID() }
+      }
+      userWasFound = false
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to delete user'
+    return { status: 'error', message, token: randomUUID() }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.delete(schema.practiceMembers).where(eq(schema.practiceMembers.userId, userId))
+
+    await tx
+      .update(schema.practiceInvites)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(schema.practiceInvites.supabaseUserId, userId),
+          isNull(schema.practiceInvites.acceptedAt),
+          isNull(schema.practiceInvites.revokedAt)
+        )
+      )
+
+    await tx
+      .update(schema.practiceInvites)
+      .set({ supabaseUserId: null })
+      .where(eq(schema.practiceInvites.supabaseUserId, userId))
+
+    await tx.delete(schema.profiles).where(eq(schema.profiles.userId, userId))
+  })
+
+  await db.insert(schema.adminAuditLogs).values({
+    action: 'user_deleted',
+    actorUserId: actorId,
+    targetUserId: userId,
+    metadata: {
+      actorEmail,
+      targetEmail,
+      userWasFound,
+      memberships: memberships.map((membership) => ({
+        practiceId: membership.practiceId,
+        practiceName: membership.practiceName,
+        role: membership.role,
+      })),
+    },
+  })
+
+  await revalidatePath('/admin')
+  await revalidatePath('/practice')
+
+  const suffix = targetEmail ? ` ${targetEmail}` : ''
+  return { status: 'success', message: `Deleted${suffix}`.trim(), token: randomUUID() }
+}
 

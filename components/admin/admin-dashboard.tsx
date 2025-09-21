@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { banUserAction, sendPasswordResetAction, updatePracticeMemberRoleAction } from '@/app/admin/actions'
+import { banUserAction, deleteUserAction, sendPasswordResetAction, updatePracticeMemberRoleAction } from '@/app/admin/actions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { AdminToast } from '@/components/admin/admin-toast'
@@ -147,6 +147,29 @@ export function AdminDashboard({ users, auditLogs, practices, error }: AdminDash
     }
   }
 
+  const handleDeleteUser = async (user: AdminUser) => {
+    const emailLabel = user.email !== '-' ? user.email : 'this account'
+    const confirmed = window.confirm(`Permanently delete ${emailLabel}? This cannot be undone.`)
+    if (!confirmed) return
+
+    setPendingAction({ type: 'delete', userId: user.id })
+    try {
+      const result = await deleteUserAction({ userId: user.id })
+
+      if (result) {
+        showToast(result.status, result.message, result.token)
+        if (result.status === 'success') {
+          startTransition(() => router.refresh())
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to delete user'
+      showToast('error', message)
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
   const handleMemberRoleChange = (practiceId: string, memberId: string, nextRole: PracticeMemberRole) => {
     setPendingMemberRole({ practiceId, userId: memberId })
     startTransition(async () => {
@@ -218,6 +241,7 @@ export function AdminDashboard({ users, auditLogs, practices, error }: AdminDash
                   {users.map((user) => {
                     const isBanPending = pendingAction?.type === 'ban' && pendingAction.userId === user.id
                     const isResetPending = pendingAction?.type === 'reset' && pendingAction.userId === user.id
+                    const isDeletePending = pendingAction?.type === 'delete' && pendingAction.userId === user.id
 
                     return (
                       <tr key={user.id} className="border-b last:border-none">
@@ -233,7 +257,7 @@ export function AdminDashboard({ users, auditLogs, practices, error }: AdminDash
                               type="button"
                               size="sm"
                               variant={user.isBanned ? 'outline' : 'destructive'}
-                              disabled={isBanPending || isResetPending || isRefreshing}
+                              disabled={isBanPending || isResetPending || isDeletePending || isRefreshing}
                               onClick={() => handleBanToggle(user)}
                             >
                               {isBanPending ? 'Updating...' : banLabel(user)}
@@ -242,10 +266,20 @@ export function AdminDashboard({ users, auditLogs, practices, error }: AdminDash
                               type="button"
                               size="sm"
                               variant="secondary"
-                              disabled={isResetPending || isBanPending || user.email === '-' || user.isBanned || isRefreshing}
+                              disabled={isResetPending || isBanPending || isDeletePending || user.email === '-' || user.isBanned || isRefreshing}
                               onClick={() => handleSendReset(user)}
                             >
                               {isResetPending ? 'Sending...' : user.isBanned ? 'Reset disabled' : 'Send reset'}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive"
+                              disabled={isDeletePending || isBanPending || isResetPending || isRefreshing}
+                              onClick={() => handleDeleteUser(user)}
+                            >
+                              {isDeletePending ? 'Deleting...' : 'Delete'}
                             </Button>
                           </div>
                         </td>

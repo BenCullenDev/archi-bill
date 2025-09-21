@@ -28,13 +28,16 @@ export default function UpdatePasswordPage() {
       const getParam = (key: string) => url.searchParams.get(key) ?? hashParams.get(key) ?? undefined
       const type = getParam('type')
       const code = getParam('code')
+      const token = getParam('token')
       const accessToken = getParam('access_token')
       const refreshToken = getParam('refresh_token')
 
       let sessionExchanged = false
 
-      if (type === 'recovery') {
-        if (code) {
+      const shouldHandleLink = type === 'recovery' || type === 'invite' || type === 'signup'
+
+      if (shouldHandleLink) {
+        if (code || token) {
           const { error } = await supabase.auth.exchangeCodeForSession(url.href)
           if (!active) return
           if (error) {
@@ -61,6 +64,7 @@ export default function UpdatePasswordPage() {
       if (sessionExchanged) {
         const cleaned = new URL(window.location.href)
         cleaned.searchParams.delete('code')
+        cleaned.searchParams.delete('token')
         cleaned.searchParams.delete('type')
         cleaned.searchParams.delete('access_token')
         cleaned.searchParams.delete('refresh_token')

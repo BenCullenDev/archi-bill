@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { AdminToast } from '@/components/admin/admin-toast'
-import { invitePracticeMember, updatePracticeAction, updatePracticeMemberRole } from '@/app/practice/actions'
+import { invitePracticeMember, resendPracticeInvite, updatePracticeAction, updatePracticeMemberRole } from '@/app/practice/actions'
 
 function generateToken() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -40,6 +40,7 @@ type PracticeSettingsProps = {
     role: string
     status: string
     createdAt: string
+    lastSentAt: string
   }>
   currentUserId: string
   canEditPractice: boolean
@@ -68,6 +69,7 @@ export default function PracticeSettings({
   const [toast, setToast] = useState<ToastState | null>(null)
   const [isPending, startTransition] = useTransition()
   const [pendingMemberId, setPendingMemberId] = useState<string | null>(null)
+  const [pendingInviteId, setPendingInviteId] = useState<string | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState<PracticeMemberRole>('member')
   const [isInvitePending, setIsInvitePending] = useState(false)
@@ -86,6 +88,8 @@ export default function PracticeSettings({
       return aIndex - bIndex
     })
   }, [members])
+
+  const isResendingInvite = pendingInviteId !== null
 
   const handlePracticeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -180,6 +184,32 @@ export default function PracticeSettings({
         setToast({ status: 'error', message, token: generateToken() })
       } finally {
         setIsInvitePending(false)
+      }
+    })
+  }
+
+  const handleInviteResend = (inviteId: string) => {
+    if (!canManageMembers) return
+
+    setPendingInviteId(inviteId)
+    startTransition(async () => {
+      try {
+        const result = await resendPracticeInvite({ inviteId })
+        if (result) {
+          setToast({
+            status: result.status,
+            message: result.message,
+            token: result.token ?? generateToken(),
+          })
+          if (result.status === 'success') {
+            router.refresh()
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to resend invite'
+        setToast({ status: 'error', message, token: generateToken() })
+      } finally {
+        setPendingInviteId(null)
       }
     })
   }
@@ -305,7 +335,7 @@ export default function PracticeSettings({
                 </select>
               </div>
               <div className="flex items-end">
-                <Button type="submit" disabled={isInvitePending || inviteEmail.trim().length === 0}>
+                <Button type="submit" disabled={isInvitePending || isResendingInvite || inviteEmail.trim().length === 0}>
                   {isInvitePending ? 'Sending...' : 'Send invite'}
                 </Button>
               </div>
@@ -357,6 +387,10 @@ export default function PracticeSettings({
             </table>
           )}
 
+          {invites.length === 0 && (
+            <p className="mt-6 text-sm text-muted-foreground">No invitations sent yet.</p>
+          )}
+
           {invites.length > 0 && (
             <div className="mt-6">
               <h3 className="text-sm font-medium text-muted-foreground">Invitations</h3>
@@ -366,20 +400,39 @@ export default function PracticeSettings({
                     <th className="py-2 pr-4">Email</th>
                     <th className="py-2 pr-4">Role</th>
                     <th className="py-2 pr-4">Status</th>
-                    <th className="py-2">Sent</th>
+                    <th className="py-2 pr-4">Last sent</th>
+                    <th className="py-2">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {invites.map((invite) => (
-                    <tr key={invite.id} className="border-b last:border-none">
-                      <td className="py-2 pr-4">{invite.email}</td>
-                      <td className="py-2 pr-4">
-                        {invite.role.charAt(0).toUpperCase() + invite.role.slice(1)}
-                      </td>
-                      <td className="py-2 pr-4 text-muted-foreground">{invite.status}</td>
-                      <td className="py-2 text-muted-foreground">{invite.createdAt}</td>
-                    </tr>
-                  ))}
+                  {invites.map((invite) => {
+                    const canResend = canManageMembers && invite.status === 'Pending'
+
+                    return (
+                      <tr key={invite.id} className="border-b last:border-none">
+                        <td className="py-2 pr-4">{invite.email}</td>
+                        <td className="py-2 pr-4">
+                          {invite.role.charAt(0).toUpperCase() + invite.role.slice(1)}
+                        </td>
+                        <td className="py-2 pr-4 text-muted-foreground">{invite.status}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">{invite.lastSentAt}</td>
+                        <td className="py-2">
+                          {canResend ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleInviteResend(invite.id)}
+                              disabled={isResendingInvite || isInvitePending}
+                            >
+                              {pendingInviteId === invite.id ? 'Sending...' : 'Resend'}
+                            </Button>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

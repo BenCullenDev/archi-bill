@@ -17,8 +17,15 @@ export type PracticeActionResult = {
 const baseAppUrl =
   process.env.NEXT_PUBLIC_APP_URL || process.env.SITE_URL || 'http://localhost:3000'
 
-const inviteRedirectUrl = `${baseAppUrl.replace(/\/$/, '')}/auth`
+const inviteRedirectUrl = `${baseAppUrl.replace(/\/$/, '')}/auth/update-password?redirectTo=${encodeURIComponent('/practice')}`
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+type SupabaseUserRecord = {
+  id: string
+  email?: string | null
+  confirmed_at?: string | null
+  email_confirmed_at?: string | null
+}
 
 function sanitizeInput(value: string | undefined | null, maxLength: number, { toLowerCase = false } = {}) {
   if (!value) return ''
@@ -53,7 +60,7 @@ async function generateUniqueSlug(name: string) {
 }
 
 async function getAuthContext() {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const supabase = createServerActionClient({ cookies: () => cookieStore })
   const {
     data: { user },
@@ -256,19 +263,12 @@ export async function invitePracticeMember(input: {
 
   const hasActiveInvite = existingInvites.some((invite) => !invite.acceptedAt && !invite.revokedAt)
   if (hasActiveInvite) {
-    return { status: 'error', message: 'An invitation has already been sent to this email', token: randomUUID() }
+    return { status: 'error', message: 'An invitation is already pending for this email. Use resend to send another email.', token: randomUUID() }
   }
 
   const supabaseAdmin = getSupabaseAdminClient()
 
-  type SupabaseUser = {
-    id: string
-    email?: string | null
-    confirmed_at?: string | null
-    email_confirmed_at?: string | null
-  }
-
-  let invitedUser: SupabaseUser | null = null
+  let invitedUser: SupabaseUserRecord | null = null
   let inviteSent = false
 
   try {
@@ -288,7 +288,7 @@ export async function invitePracticeMember(input: {
           }
         }
         const users = listData?.users ?? []
-        invitedUser = (users.find((candidate) => (candidate.email ?? '').toLowerCase() === email) as SupabaseUser) ?? null
+        invitedUser = (users.find((candidate) => (candidate.email ?? '').toLowerCase() === email) as SupabaseUserRecord) ?? null
         if (!invitedUser) {
           return {
             status: 'error',
@@ -300,7 +300,7 @@ export async function invitePracticeMember(input: {
         return { status: 'error', message, token: randomUUID() }
       }
     } else {
-      invitedUser = (response.data?.user ?? null) as SupabaseUser | null
+      invitedUser = (response.data?.user ?? null) as SupabaseUserRecord | null
       inviteSent = true
     }
   } catch (err) {
@@ -363,6 +363,132 @@ export async function invitePracticeMember(input: {
   await revalidatePath('/admin')
 
   const message = inviteSent ? `Invitation sent to ${email}` : `Added ${email} to the practice`
+  return { status: 'success', message, token: randomUUID() }
+}
+
+export async function resendPracticeInvite(input: {
+  inviteId: string
+}): Promise<PracticeActionResult> {
+  const { user, error } = await getAuthContext()
+  if (error || !user) {
+    return { status: 'error', message: 'Not authenticated', token: randomUUID() }
+  }
+
+  const inviteId = input.inviteId
+  if (!inviteId) {
+    return { status: 'error', message: 'Invite ID is required', token: randomUUID() }
+  }
+
+  const inviteRows = await db
+    .select({
+      id: schema.practiceInvites.id,
+      practiceId: schema.practiceInvites.practiceId,
+      email: schema.practiceInvites.email,
+      role: schema.practiceInvites.role,
+      acceptedAt: schema.practiceInvites.acceptedAt,
+      revokedAt: schema.practiceInvites.revokedAt,
+      supabaseUserId: schema.practiceInvites.supabaseUserId,
+    })
+    .from(schema.practiceInvites)
+    .where(eq(schema.practiceInvites.id, inviteId))
+    .limit(1)
+
+  const invite = inviteRows[0]
+  if (!invite) {
+    return { status: 'error', message: 'Invite not found', token: randomUUID() }
+  }
+
+  const ownerMembership = await db
+    .select({ role: schema.practiceMembers.role })
+    .from(schema.practiceMembers)
+    .where(
+      and(
+        eq(schema.practiceMembers.practiceId, invite.practiceId),
+        eq(schema.practiceMembers.userId, user.id)
+      )
+    )
+    .limit(1)
+
+  if (!ownerMembership.length || ownerMembership[0].role !== 'owner') {
+    return { status: 'error', message: 'Only practice owners can resend invites', token: randomUUID() }
+  }
+
+  if (invite.revokedAt) {
+    return { status: 'error', message: 'This invite has been revoked', token: randomUUID() }
+  }
+
+  if (invite.acceptedAt) {
+    return { status: 'error', message: 'This invite has already been accepted', token: randomUUID() }
+  }
+
+  const supabaseAdmin = getSupabaseAdminClient()
+  const emailLower = invite.email.toLowerCase()
+  let supabaseUserId = invite.supabaseUserId ?? null
+  let sentViaReset = false
+
+  try {
+    const response = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
+      redirectTo: inviteRedirectUrl,
+    })
+
+    if (response.error) {
+      const message = response.error.message ?? 'Unable to send invitation'
+      if (message.toLowerCase().includes('already registered')) {
+        if (!supabaseUserId) {
+          const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 })
+          if (listError) {
+            return { status: 'error', message: listError.message ?? 'Unable to locate user', token: randomUUID() }
+          }
+          const users = listData?.users ?? []
+          const existingUser = (
+            users.find((candidate) => (candidate.email ?? '').toLowerCase() === emailLower) as SupabaseUserRecord | undefined
+          )
+          if (existingUser?.id) {
+            supabaseUserId = existingUser.id
+          }
+        }
+
+        const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(invite.email, {
+          redirectTo: inviteRedirectUrl,
+        })
+        if (resetError) {
+          return { status: 'error', message: resetError.message ?? 'Unable to send invitation', token: randomUUID() }
+        }
+        sentViaReset = true
+      } else {
+        return { status: 'error', message, token: randomUUID() }
+      }
+    } else {
+      const invitedUser = (response.data?.user ?? null) as SupabaseUserRecord | null
+      if (invitedUser?.id) {
+        supabaseUserId = invitedUser.id
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unable to send invitation'
+    return { status: 'error', message, token: randomUUID() }
+  }
+
+  if (!supabaseUserId) {
+    return { status: 'error', message: 'Unable to determine user for invitation', token: randomUUID() }
+  }
+
+  await db
+    .update(schema.practiceInvites)
+    .set({
+      supabaseUserId,
+      token: randomUUID(),
+      lastSentAt: new Date(),
+    })
+    .where(eq(schema.practiceInvites.id, inviteId))
+
+  await revalidatePath('/practice')
+  await revalidatePath('/admin')
+
+  const message = sentViaReset
+    ? `Password reset sent to ${invite.email}`
+    : `Invitation resent to ${invite.email}`
+
   return { status: 'success', message, token: randomUUID() }
 }
 
